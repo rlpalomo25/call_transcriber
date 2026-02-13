@@ -6,16 +6,14 @@ import { saveFileToLocal, downloadBlob } from '../services/fileService';
 interface RecorderProps {
   dirHandle: FileSystemDirectoryHandle | null;
   onSessionComplete: (session: any) => void;
-  onApiError?: () => void;
 }
 
-const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApiError }) => {
+const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [timer, setTimer] = useState(0);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>('');
-  const [includeSystemAudio, setIncludeSystemAudio] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -30,7 +28,7 @@ const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApi
         setDevices(mics);
         if (mics.length > 0 && !selectedMic) setSelectedMic(mics[0].deviceId);
       } catch (err) {
-        console.error("Device error:", err);
+        console.error("Could not access microphone list:", err);
       }
     };
     getDevices();
@@ -53,37 +51,21 @@ const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApi
 
   const startRecording = async () => {
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const destination = audioContext.createMediaStreamDestination();
-
-      const micStream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: { deviceId: selectedMic ? { exact: selectedMic } : undefined }
       });
-      audioContext.createMediaStreamSource(micStream).connect(destination);
 
-      let systemStream: MediaStream | null = null;
-      if (includeSystemAudio) {
-        try {
-          systemStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-          const systemAudioTracks = systemStream.getAudioTracks();
-          if (systemAudioTracks.length > 0) {
-            audioContext.createMediaStreamSource(new MediaStream(systemAudioTracks)).connect(destination);
-          }
-        } catch (err) {
-          console.warn("System audio cancelled");
-        }
-      }
-
-      const mediaRecorder = new MediaRecorder(destination.stream, { mimeType: 'audio/webm' });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorderRef.current = mediaRecorder;
       const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
       
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-        micStream.getTracks().forEach(t => t.stop());
-        if (systemStream) systemStream.getTracks().forEach(t => t.stop());
-        audioContext.close();
+        stream.getTracks().forEach(t => t.stop());
         await handleProcessing(audioBlob);
       };
 
@@ -92,32 +74,40 @@ const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApi
       setTimer(0);
       setShowSettings(false);
     } catch (err) {
-      alert("Recording failed. Check permissions.");
+      alert("Failed to start recording. Please check your microphone permissions.");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
   };
 
   const handleProcessing = async (blob: Blob) => {
+    if (blob.size < 1000) {
+      alert("Recording was too short. Please try again.");
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const reader = new FileReader();
-      const base64Promise = new Promise<string>((res) => {
-        reader.onloadend = () => res((reader.result as string).split(',')[1]);
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const base64String = (reader.result as string).split(',')[1];
+          resolve(base64String);
+        };
         reader.readAsDataURL(blob);
       });
-      const base64Audio = await base64Promise;
       
+      const base64Audio = await base64Promise;
       const aiResult = await transcribeAndSummarize(base64Audio, 'audio/webm');
       
       const timestamp = new Date().getTime();
-      const fileName = `Meeting_${timestamp}.webm`;
-      const txtName = `Notes_${timestamp}.txt`;
+      const fileName = `BobbyMeeting_${timestamp}.webm`;
+      const txtName = `BobbyNotes_${timestamp}.txt`;
 
       if (dirHandle) {
         await saveFileToLocal(dirHandle, fileName, blob);
@@ -129,22 +119,15 @@ const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApi
 
       onSessionComplete({
         id: String(timestamp),
-        title: `Session ${new Date().toLocaleDateString()}`,
+        title: `Meeting - ${new Date().toLocaleDateString()}`,
         duration: timer,
         transcription: aiResult,
         date: new Date().toLocaleString()
       });
 
     } catch (error: any) {
-      console.error("Processing error details:", error);
-      const msg = error?.message || "";
-      
-      if (msg.includes("API_KEY") || msg.includes("entity was not found") || msg.includes("403") || msg.includes("401")) {
-        alert("API Key failed or unauthorized. Please re-enter your key.");
-        onApiError?.();
-      } else {
-        alert("AI Processing failed: " + msg);
-      }
+      console.error("Processing error:", error);
+      alert(`AI Processing Failed: ${error.message}`);
     } finally {
       setIsProcessing(false);
       setTimer(0);
@@ -152,44 +135,51 @@ const Recorder: React.FC<RecorderProps> = ({ dirHandle, onSessionComplete, onApi
   };
 
   return (
-    <div className="glass rounded-3xl p-8 flex flex-col items-center justify-center relative min-h-[350px]">
+    <div className="glass rounded-3xl p-8 flex flex-col items-center justify-center relative min-h-[350px] shadow-2xl">
       {!isRecording && !isProcessing && (
-        <button onClick={() => setShowSettings(!showSettings)} className="absolute top-6 right-6 text-slate-500 hover:text-white transition-colors">
-          <i className={`fas ${showSettings ? 'fa-times' : 'fa-cog'}`}></i>
+        <button 
+          onClick={() => setShowSettings(!showSettings)} 
+          className="absolute top-6 right-6 text-slate-500 hover:text-sky-400 transition-colors"
+          title="Audio Settings"
+        >
+          <i className={`fas ${showSettings ? 'fa-times' : 'fa-cog'} text-xl`}></i>
         </button>
       )}
 
       {showSettings ? (
-        <div className="w-full max-w-xs space-y-6 animate-in fade-in duration-300">
+        <div className="w-full max-w-xs space-y-6 animate-in fade-in zoom-in duration-300">
+          <h3 className="text-center font-bold text-slate-300">Audio Settings</h3>
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase">Mic Source</label>
-            <select value={selectedMic} onChange={e => setSelectedMic(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs">
-              {devices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)}
+            <label className="text-[10px] font-bold text-slate-500 uppercase">Input Device</label>
+            <select 
+              value={selectedMic} 
+              onChange={e => setSelectedMic(e.target.value)} 
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-sky-500"
+            >
+              {devices.map(d => <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0, 5)}`}</option>)}
+              {devices.length === 0 && <option value="">No microphones found</option>}
             </select>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold">System Audio</span>
-            <button onClick={() => setIncludeSystemAudio(!includeSystemAudio)} className={`w-10 h-5 rounded-full relative transition-colors ${includeSystemAudio ? 'bg-sky-500' : 'bg-slate-700'}`}>
-              <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${includeSystemAudio ? 'right-1' : 'left-1'}`}></div>
-            </button>
-          </div>
+          <p className="text-[10px] text-slate-500 text-center italic">Make sure your browser has mic permissions enabled.</p>
         </div>
       ) : (
         <>
-          <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 transition-all ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-slate-800'}`}>
-            <i className={`fas ${isRecording ? 'fa-stop' : 'fa-microphone'} text-2xl`}></i>
+          <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-8 transition-all duration-500 ${isRecording ? 'bg-red-500 shadow-[0_0_30px_rgba(239,68,68,0.5)] animate-pulse' : isProcessing ? 'bg-sky-500 shadow-[0_0_30px_rgba(56,189,248,0.5)]' : 'bg-slate-800'}`}>
+            <i className={`fas ${isProcessing ? 'fa-spinner fa-spin' : isRecording ? 'fa-stop' : 'fa-microphone'} text-3xl text-white`}></i>
           </div>
-          <div className="text-4xl font-mono font-bold mb-2">{formatTime(timer)}</div>
-          <p className="text-xs text-slate-500 uppercase tracking-widest mb-8">
-            {isRecording ? 'Recording...' : isProcessing ? 'AI Processing...' : 'Ready'}
+          <div className="text-5xl font-mono font-bold mb-2 tracking-tighter text-white">
+            {formatTime(timer)}
+          </div>
+          <p className="text-xs text-slate-500 uppercase tracking-[0.2em] font-bold mb-10">
+            {isRecording ? 'LIVE RECORDING' : isProcessing ? 'AI ANALYZING...' : 'READY TO RECORD'}
           </p>
           
           <button 
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isProcessing}
-            className={`px-8 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95 ${isRecording ? 'bg-red-500 hover:bg-red-400' : 'bg-sky-500 hover:bg-sky-400'} text-white`}
+            className={`px-12 py-4 rounded-2xl font-bold transition-all shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${isRecording ? 'bg-red-500 hover:bg-red-400' : 'bg-sky-500 hover:bg-sky-400'} text-white text-lg`}
           >
-            {isRecording ? 'Stop Meeting' : 'Start Meeting'}
+            {isRecording ? 'End Meeting' : 'Start Recording'}
           </button>
         </>
       )}

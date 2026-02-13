@@ -1,13 +1,12 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
+/**
+ * Transcribes audio and generates a summary using the Gemini model.
+ * The API key is sourced directly from process.env.API_KEY.
+ */
 export const transcribeAndSummarize = async (audioBase64: string, mimeType: string) => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API_KEY_MISSING: No API key found in environment.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
     const response = await ai.models.generateContent({
@@ -22,7 +21,7 @@ export const transcribeAndSummarize = async (audioBase64: string, mimeType: stri
               },
             },
             {
-              text: "Please transcribe this meeting audio accurately. After the transcription, provide a detailed summary including: 1. Main Topics Discussed 2. Key Decisions 3. Action Items. Format with clear headings.",
+              text: "Please transcribe this meeting audio accurately. After the transcription, provide a detailed summary including: 1. Main Topics Discussed 2. Key Decisions 3. Action Items. Format the output with clear Markdown headings.",
             },
           ],
         },
@@ -30,44 +29,13 @@ export const transcribeAndSummarize = async (audioBase64: string, mimeType: stri
     });
 
     if (!response.text) {
-      throw new Error("EMPTY_RESPONSE: The model returned an empty response.");
+      throw new Error("The AI returned an empty response. Please try a longer recording.");
     }
 
     return response.text;
   } catch (error: any) {
-    console.error("Gemini AI Processing Error:", error);
-    // Pass through specific error messages for the UI to handle
-    throw error;
-  }
-};
-
-export const summarizeText = async (transcription: string) => {
-  const apiKey = process.env.API_KEY;
-  const ai = new GoogleGenAI({ apiKey });
-  
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Summarize the following meeting transcript into key points and a list of action items: \n\n ${transcription}`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            actionItems: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING } 
-            }
-          },
-          required: ["summary", "actionItems"]
-        }
-      }
-    });
-
-    return JSON.parse(response.text);
-  } catch (error) {
-    console.error("Gemini AI Summarization Error:", error);
-    throw error;
+    console.error("Gemini API Error:", error);
+    // Re-throw with a more user-friendly message if possible
+    throw new Error(error.message || "An unexpected error occurred during AI processing.");
   }
 };

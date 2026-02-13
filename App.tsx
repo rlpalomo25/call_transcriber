@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Recorder from './components/Recorder';
-import { AppRoute, RecordingSession, StorageSettings } from './types';
+import { AppRoute, RecordingSession } from './types';
 import { pickDirectory } from './services/fileService';
 
 const App: React.FC = () => {
@@ -11,31 +11,6 @@ const App: React.FC = () => {
   const [dirHandle, setDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [selectedSession, setSelectedSession] = useState<RecordingSession | null>(null);
   const [isPickerBlocked, setIsPickerBlocked] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState<boolean>(true);
-
-  const checkApiKeyStatus = useCallback(async () => {
-    if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-      const selected = await window.aistudio.hasSelectedApiKey();
-      setHasApiKey(selected);
-    }
-  }, []);
-
-  useEffect(() => {
-    checkApiKeyStatus();
-  }, [checkApiKeyStatus]);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-      await window.aistudio.openSelectKey();
-      // Assume success after opening dialog
-      setHasApiKey(true);
-    }
-  };
-
-  const resetApiKey = useCallback(() => {
-    setHasApiKey(false);
-    handleSelectKey();
-  }, []);
 
   // Load state from local storage
   useEffect(() => {
@@ -71,36 +46,6 @@ const App: React.FC = () => {
     }
   };
 
-  if (!hasApiKey) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="glass p-12 rounded-[2.5rem] max-w-lg w-full space-y-8 border-sky-500/20 shadow-2xl shadow-sky-500/10">
-          <div className="w-20 h-20 bg-gradient-to-br from-sky-400 to-indigo-600 rounded-3xl mx-auto flex items-center justify-center text-3xl text-white shadow-lg">
-            <i className="fas fa-key"></i>
-          </div>
-          <div className="space-y-4">
-            <h1 className="text-3xl font-bold">API Access Required</h1>
-            <p className="text-slate-400 leading-relaxed">
-              BobbyAi needs a valid Gemini API key to transcribe and analyze your meetings.
-            </p>
-            <div className="text-xs text-left text-slate-500 bg-slate-900/50 p-4 rounded-xl border border-white/5 space-y-2">
-              <p>1. Go to <a href="https://aistudio.google.com/" target="_blank" className="text-sky-400 underline">Google AI Studio</a></p>
-              <p>2. Create/Copy your API Key</p>
-              <p>3. Click "Connect" below and paste it when prompted</p>
-            </div>
-          </div>
-          <button 
-            onClick={handleSelectKey}
-            className="w-full py-4 bg-sky-500 hover:bg-sky-400 text-white rounded-2xl font-bold text-lg transition-all shadow-xl shadow-sky-500/20 active:scale-95 flex items-center justify-center gap-3"
-          >
-            Connect API Key
-            <i className="fas fa-plug"></i>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const renderDashboard = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
       <header>
@@ -110,7 +55,7 @@ const App: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
-          <Recorder dirHandle={dirHandle} onSessionComplete={handleSessionComplete} onApiError={resetApiKey} />
+          <Recorder dirHandle={dirHandle} onSessionComplete={handleSessionComplete} />
         </div>
         <div className="glass rounded-3xl p-6 flex flex-col">
           <div className="flex items-center justify-between mb-6">
@@ -176,20 +121,21 @@ const App: React.FC = () => {
               className={`p-4 rounded-2xl cursor-pointer border transition-all ${selectedSession?.id === s.id ? 'bg-sky-500/10 border-sky-500/30' : 'bg-slate-800/40 border-transparent'}`}
             >
               <h4 className="font-semibold text-sm line-clamp-1">{s.title}</h4>
-              <p className="text-[10px] text-slate-500 uppercase">{s.date}</p>
+              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">{s.date}</p>
             </div>
           ))}
+          {sessions.length === 0 && <p className="text-slate-500 text-sm italic p-4">No recordings yet.</p>}
         </div>
         <div className="xl:col-span-3">
           {selectedSession ? (
-            <div className="glass rounded-3xl p-8 min-h-[500px]">
+            <div className="glass rounded-3xl p-8 min-h-[500px] flex flex-col">
               <h3 className="text-2xl font-bold mb-6">{selectedSession.title}</h3>
-              <div className="bg-slate-900/50 rounded-2xl p-6 border border-white/5 whitespace-pre-wrap text-slate-300 text-sm leading-relaxed">
+              <div className="flex-1 bg-slate-900/50 rounded-2xl p-6 border border-white/5 whitespace-pre-wrap text-slate-300 text-sm leading-relaxed overflow-y-auto">
                 {selectedSession.transcription}
               </div>
             </div>
           ) : (
-            <div className="glass rounded-3xl p-8 flex items-center justify-center text-slate-500 italic">
+            <div className="glass rounded-3xl p-8 min-h-[500px] flex items-center justify-center text-slate-500 italic">
                Select a recording to view
             </div>
           )}
@@ -198,29 +144,41 @@ const App: React.FC = () => {
     </div>
   );
 
+  const renderSettings = () => (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <h2 className="text-2xl font-bold">Settings</h2>
+      <div className="glass rounded-3xl p-8 space-y-8">
+          <div>
+            <h4 className="font-bold">Storage Routing</h4>
+            <p className="text-sm text-slate-500 mb-4">Direct your recording files to a specific local folder.</p>
+            <div className="p-4 bg-slate-900 rounded-xl border border-white/5 flex items-center justify-between">
+              <code className="text-sky-400 text-xs">
+                {dirHandle ? `Path: ${dirHandle.name}` : isPickerBlocked ? 'Mode: Browser Downloads' : 'Not Set'}
+              </code>
+              <button onClick={handlePickDirectory} className="text-xs text-sky-500 hover:underline font-bold">
+                {dirHandle ? 'Update' : 'Configure'}
+              </button>
+            </div>
+          </div>
+          <div className="border-t border-slate-800 pt-8">
+            <h4 className="font-bold text-red-400 mb-4">Danger Zone</h4>
+            <button 
+              onClick={() => { if(confirm("Clear all meeting data? This cannot be undone.")) { setSessions([]); localStorage.removeItem('bobby_ai_sessions'); }}} 
+              className="px-4 py-2 bg-red-500/10 text-red-500 rounded-lg text-xs font-bold border border-red-500/20 hover:bg-red-500/20 transition-colors"
+            >
+              Clear Local Cache
+            </button>
+          </div>
+      </div>
+    </div>
+  );
+
   const renderContent = () => {
     switch (route) {
       case AppRoute.DASHBOARD: return renderDashboard();
       case AppRoute.RECORDINGS: return renderRecordings();
-      case AppRoute.SETTINGS: return (
-        <div className="max-w-2xl mx-auto space-y-6">
-          <h2 className="text-2xl font-bold">Settings</h2>
-          <div className="glass rounded-3xl p-8 space-y-8">
-             <div className="flex items-center justify-between">
-                <div>
-                   <h4 className="font-bold">Connected API</h4>
-                   <p className="text-sm text-slate-500">Change your Google Gemini API Key</p>
-                </div>
-                <button onClick={handleSelectKey} className="px-4 py-2 bg-slate-800 rounded-lg text-xs font-bold">Update Key</button>
-             </div>
-             <div className="border-t border-slate-800 pt-8">
-                <h4 className="font-bold text-red-400 mb-4">Danger Zone</h4>
-                <button onClick={() => { if(confirm("Delete all?")) setSessions([]); }} className="px-4 py-2 bg-red-500/10 text-red-500 rounded-lg text-xs font-bold border border-red-500/20">Clear Cache</button>
-             </div>
-          </div>
-        </div>
-      );
-      default: return null;
+      case AppRoute.SETTINGS: return renderSettings();
+      default: return renderDashboard();
     }
   };
 
