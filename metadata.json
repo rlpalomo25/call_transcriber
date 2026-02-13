@@ -1,0 +1,8 @@
+{
+  "name": "BobbyAi.notes - Meeting Recorder",
+  "description": "A sleek, AI-powered meeting recording and transcription suite that integrates with your calendar and local storage.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
