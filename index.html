@@ -37,7 +37,11 @@
             border-radius: 10px;
         }
     </style>
-<script type="importmap">
+    <script>
+        // Polyfill process for browser environments to prevent ReferenceErrors
+        window.process = window.process || { env: {} };
+    </script>
+    <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@19.0.0",
